@@ -1,3 +1,24 @@
+/* Quietude - RepRap host software intended to be run on a BeagleBone
+ * Copyright (c) 2013 Clayton G. Hobbs
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
 // $ gcc -g -o quietude quietude.c `pkg-config --cflags --libs libbone`
 // # ./quietude
 #include <ctype.h>
@@ -23,6 +44,7 @@
 #define REPRAPDEVICE "/dev/ttyACM0"
 #define _POSIX_SOURCE 1
 #define WRITE_TO_STDOUT
+#define TRIM_MESSAGES
 
 
 bone_ssd1306_t *display;
@@ -31,6 +53,9 @@ char *ss[SCROLLBACK];
 bool eof_seen = false;
 int nlines = 0;
 bool cts = false;
+
+void console(void);
+void manual(void);
 
 
 ssize_t read_line(int filedes, char *buf, size_t nbyte)
@@ -125,26 +150,37 @@ int handle_printer(void)
         write = buf;
         // "start" isn't a very useful message to the user
         if (strncmp(buf, "start", 5) == 0) {
+#ifdef TRIM_MESSAGES
             write = NULL;
+#endif
             cts = true;
         }
         // Strip out debug message prefixes, as our display is quite small
         if (strncmp(buf, "echo:", 5) == 0) {
+#ifdef TRIM_MESSAGES
             write = buf + 5;
+#endif
         }
         if (strncmp(buf, "//", 2) == 0) {
+#ifdef TRIM_MESSAGES
             write = buf + 2;
+#endif
         }
         // Don't fill the console with "ok"
         if (strncmp(buf, "ok", 2) == 0) {
+#ifdef TRIM_MESSAGES
             write = NULL;
+#endif
             cts = true;
         }
 
         // Write to the console if the message wasn't set hidden above
         if (write != NULL) {
+#ifdef TRIM_MESSAGES
+            // Remove leading whitespace
             while (isspace(write[0]) && write[0] != '\0')
                 write++;
+#endif
             write_console(write);
         }
         // Poll the printer without blocking to see if we've read everything
@@ -152,6 +188,108 @@ int handle_printer(void)
         // If we haven't read everything available and more data will ever be
         // available, keep iterating
     } while (pfd[0].revents != 0 && !eof_seen);
+}
+
+
+void menu(void)
+{
+    int i;
+    int item = 0;
+    char items[2][21] = {
+        "Console",
+        "Manual"
+    };
+
+    while (!eof_seen) {
+        for (i = 0; i < 2; i++) {
+            bone_ssd1306_str(display, 1, 56-8*i, 1, items[i]);
+        }
+        bone_ssd1306_rect(display, 0, 56-8*item, 6*strlen(items[item]),
+                64-8*item, 1);
+        bone_ssd1306_str(display, 1, 56-8*item, 0, items[item]);
+        bone_ssd1306_line(display, 121, 0, 121, 63, 1);
+        bone_ssd1306_str(display, 123, 56, 1, "Q\nU\nI\nE\nT\nU\nD\nE");
+        bone_ssd1306_draw(display);
+
+        poll(pfd, 6, -1);
+        bone_ssd1306_clear(display, 0);
+        if (pfd[0].revents != 0) {
+            handle_printer();
+        }
+        if (pfd[1].revents & POLLPRI) {
+            get_lead(pfd[1].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[1].fd);
+            item--;
+        }
+        if (pfd[2].revents & POLLPRI) {
+            get_lead(pfd[2].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[2].fd);
+            item++;
+        }
+        if (pfd[3].revents & POLLPRI) {
+            get_lead(pfd[3].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[3].fd);
+        }
+        if (pfd[4].revents & POLLPRI) {
+            get_lead(pfd[4].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[4].fd);
+        }
+        if (pfd[5].revents & POLLPRI) {
+            get_lead(pfd[5].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[5].fd);
+            if (item == 0)
+                console();
+            if (item == 1)
+                manual();
+        }
+    }
+}
+
+
+void manual(void)
+{
+    while (!eof_seen) {
+        bone_ssd1306_line(display, 121, 0, 121, 63, 1);
+        bone_ssd1306_str(display, 123, 56, 1, "M\nA\nN\nU\nA\nL");
+        bone_ssd1306_draw(display);
+
+        poll(pfd, 6, -1);
+        bone_ssd1306_clear(display, 0);
+        if (pfd[0].revents != 0) {
+            handle_printer();
+        }
+        if (pfd[1].revents & POLLPRI) {
+            get_lead(pfd[1].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[1].fd);
+        }
+        if (pfd[2].revents & POLLPRI) {
+            get_lead(pfd[2].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[2].fd);
+        }
+        if (pfd[3].revents & POLLPRI) {
+            get_lead(pfd[3].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[3].fd);
+        }
+        if (pfd[4].revents & POLLPRI) {
+            get_lead(pfd[4].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[4].fd);
+        }
+        if (pfd[5].revents & POLLPRI) {
+            get_lead(pfd[5].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[5].fd);
+            return;
+        }
+    }
 }
 
 
@@ -185,6 +323,9 @@ void keyboard(void)
         for (i = 0; i < nbyte; i++) {
             bone_ssd1306_char(display, 6*i, 0, 1, cmd[i]);
         }
+        bone_ssd1306_char(display, 6*i, 0, 1, '_');
+        bone_ssd1306_line(display, 121, 0, 121, 63, 1);
+        bone_ssd1306_str(display, 123, 56, 1, "K\nE\nY\nB\nO\nA\nR\nD");
         bone_ssd1306_draw(display);
 
         poll(pfd, 6, -1);
@@ -242,7 +383,14 @@ void keyboard(void)
                 nbyte--;
             } else if (keys[y][x] == '@') {
                 cmd[nbyte] = '\n';
+                while (!cts) {
+                    poll(pfd, 1, -1);
+                    if (pfd[0].revents != 0) {
+                        handle_printer();
+                    }
+                }
                 write(pfd[0].fd, cmd, nbyte+1);
+                cts = false;
                 cmd[nbyte] = '\0';
                 write_console(cmd);
                 nbyte = 0;
@@ -265,6 +413,7 @@ void console(void)
 {
     int i, value;
     static int pos = SCROLLBACK - 8;
+    bool title_selected = false;
 
     for (i = 1; i < 6; i++)
         get_lead(pfd[i].fd);
@@ -273,8 +422,13 @@ void console(void)
         for (i = 0; i < CONSOLE_LINES; i++) {
             bone_ssd1306_str(display, 0, 56-8*i, 1, ss[i+pos]);
         }
-        bone_ssd1306_line(display, 121, 0, 121, 63, 1);
-        bone_ssd1306_str(display, 123, 56, 1, "C\nO\nN\nS\nO\nL\nE");
+        if (!title_selected) {
+            bone_ssd1306_line(display, 121, 0, 121, 63, 1);
+            bone_ssd1306_str(display, 123, 56, 1, "C\nO\nN\nS\nO\nL\nE");
+        } else {
+            bone_ssd1306_rect(display, 121, 0, 127, 63, 1);
+            bone_ssd1306_str(display, 122, 56, 0, "C\nO\nN\nS\nO\nL\nE");
+        }
         bone_ssd1306_line(display, 120,
                 8*CONSOLE_LINES*(1-(pos+CONSOLE_LINES-SCROLLBACK+nlines)/(float)nlines),
                 120, 8*CONSOLE_LINES*(1-(pos-SCROLLBACK+nlines)/(float)nlines), 1);
@@ -301,15 +455,24 @@ void console(void)
         }
         if (pfd[3].revents & POLLPRI) {
             get_lead(pfd[3].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[3].fd);
+            title_selected = true;
         }
         if (pfd[4].revents & POLLPRI) {
             get_lead(pfd[4].fd);
+            usleep(DEBOUNCE_DELAY);
+            get_lead(pfd[4].fd);
+            title_selected = false;
         }
         if (pfd[5].revents & POLLPRI) {
             get_lead(pfd[5].fd);
             usleep(DEBOUNCE_DELAY);
             get_lead(pfd[5].fd);
-            keyboard();
+            if (!title_selected)
+                keyboard();
+            else
+                return;
         }
     }
 }
@@ -399,7 +562,7 @@ int main(int argc, char *argv[])
     bone_ssd1306_setup(display);
 
     // Run the program
-    console();
+    menu();
 
     bone_ssd1306_free(display);
     for (i = 0; i <= 5; i++)
